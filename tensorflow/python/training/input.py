@@ -689,7 +689,7 @@ def batch_join(tensors_list, batch_size, capacity=32, enqueue_many=False,
 
 def shuffle_batch(tensors, batch_size, capacity, min_after_dequeue,
                   num_threads=1, seed=None, enqueue_many=False, shapes=None,
-                  shared_name=None, name=None):
+                  shared_name=None, name=None, dynamic_pad=False):
   """Creates batches by randomly shuffling tensors.
 
   This function adds the following to the current `Graph`:
@@ -780,7 +780,13 @@ def shuffle_batch(tensors, batch_size, capacity, min_after_dequeue,
 
     dequeued = queue.dequeue_many(batch_size, name=name)
     dequeued = _deserialize_sparse_tensors(dequeued, sparse_info)
-    return _as_original_type(tensors, dequeued)
+    result = dequeued
+    if dynamic_pad:
+        pad_queue = data_flow_ops.PaddingFIFOQueue(capacity=capacity,
+                dtypes=types, shapes=shapes, shared_name=shared_name)
+        _enqueue(pad_queue, dequeued, num_threads, enqueue_many)
+        result = pad_queue.dequeue_many(batch_size, name=name)
+    return _as_original_type(tensors, result)
 
 
 def shuffle_batch_join(tensors_list, batch_size, capacity,
