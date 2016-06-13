@@ -911,6 +911,54 @@ class ShuffleBatchTest(tf.test.TestCase):
           batched[0].op.inputs[0].op.node_def.attr["shared_name"])
 
 
+  def testDynamicPad(self):
+    with self.test_session() as sess:
+      batch_size = 10
+      num_batches = 3
+      zero64 = tf.constant(0, dtype=tf.int64)
+      examples = tf.Variable(zero64)
+      counter = examples.count_up_to(num_batches * batch_size)
+      string = tf.tile(["string"], tf.to_int32(tf.pack([counter])))
+      sparse_counter = tf.SparseTensor(
+          indices=tf.reshape(zero64, [1, 1]),
+          values=tf.pack([tf.cast(counter, tf.float32)]),
+          shape=[1])
+      batched = tf.train.shuffle_batch(
+          [counter, sparse_counter, string],
+          batch_size=batch_size, capacity=32,
+          min_after_dequeue=16, seed=141421, dynamic_pad=True)
+      batched_fetch = batched
+      tf.initialize_all_variables().run()
+      tf.initialize_local_variables().run()
+      threads = tf.train.start_queue_runners()
+
+      all_counts = []
+      for i in range(num_batches):
+        results = sess.run(batched_fetch)
+        print(results)
+        self.assertEqual(len(results[0]), batch_size)
+        all_counts.extend(results[0])
+        self.assertAllEqual(
+            results[1].indices,
+            np.vstack((np.arange(batch_size), np.zeros(batch_size))).T)
+        self.assertAllEqual(results[0], results[1].values)
+        self.assertAllEqual(results[1].shape, [batch_size, 1])
+        self.assertAllEqual(results[2], [b"string"] * batch_size)
+      # Results scrambled, but include all the expected numbers.
+      deltas = [all_counts[i + 1] - all_counts[i]
+                for i in range(len(all_counts) - 1)]
+      self.assertFalse(all(d == deltas[0] for d in deltas))
+      self.assertItemsEqual(all_counts, range(num_batches * batch_size))
+
+      # Reached the limit.
+      with self.assertRaises(tf.errors.OutOfRangeError):
+        sess.run(batched_fetch)
+      for thread in threads:
+        thread.join()
+
+
+
+
 class ShuffleBatchJoinTest(tf.test.TestCase):
 
   def _testTwoThreadsHelper(self, use_dict):

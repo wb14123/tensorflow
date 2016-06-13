@@ -778,15 +778,19 @@ def shuffle_batch(tensors, batch_size, capacity, min_after_dequeue,
         (name, min_after_dequeue, capacity - min_after_dequeue))
     logging_ops.scalar_summary(summary_name, full)
 
-    dequeued = queue.dequeue_many(batch_size, name=name)
-    dequeued = _deserialize_sparse_tensors(dequeued, sparse_info)
-    result = dequeued
     if dynamic_pad:
-        pad_queue = data_flow_ops.PaddingFIFOQueue(capacity=capacity,
-                dtypes=types, shapes=shapes, shared_name=shared_name)
-        _enqueue(pad_queue, dequeued, num_threads, enqueue_many)
-        result = pad_queue.dequeue_many(batch_size, name=name)
-    return _as_original_type(tensors, result)
+      fetch = queue.dequeue()
+      pad_shapes = _shapes(fetch, shapes, equeue_many)
+      pad_queue = data_flow_ops.PaddingFIFOQueue(capacity=capacity,
+              dtypes=types, shapes=pad_shapes, shared_name=shared_name)
+      # fetch = _deserialize_sparse_tensors([fetch], sparse_info)
+      # print("fetch sparse: " + str(fetch))
+      _enqueue(pad_queue, fetch, num_threads, enqueue_many)
+      dequeued = pad_queue.dequeue_many(batch_size, name=name)
+    else:
+      dequeued = queue.dequeue_many(batch_size, name=name)
+    dequeued = _deserialize_sparse_tensors(dequeued, sparse_info)
+    return _as_original_type(tensors, dequeued)
 
 
 def shuffle_batch_join(tensors_list, batch_size, capacity,
